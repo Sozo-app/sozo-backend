@@ -10,6 +10,7 @@
   "scripts": {
     "start": "node index.js",
     "dev": "nodemon index.js",
+    "test": "node --test",
     "seed:admin": "node scripts/seedAdmin.js",
     "docker:up": "docker compose up -d --build",
     "docker:down": "docker compose down",

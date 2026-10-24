@@ -149,6 +149,12 @@ module.exports = {
           quality:   { type: 'string', example: '720p' },
           videoUrl:  { type: 'string', description: 'To\'g\'ridan-to\'g\'ri MP4/video URL' },
           isDefault: { type: 'boolean' },
+          type:      { type: 'string', nullable: true, example: 'hls' },
+          host:      { type: 'string', nullable: true, description: 'Provider/add-on label' },
+          audioLanguage: { type: 'string', nullable: true, example: 'hi' },
+          audioLanguages: { type: 'array', items: { type: 'string' }, description: 'Explicit language labels from the stream provider metadata, not inspected tracks.' },
+          multiAudio: { type: 'boolean', description: 'The provider labels the source as Multi/Dual Audio; individual tracks are not identified.' },
+          languageSource: { type: 'string', nullable: true },
         },
       },
 
@@ -162,7 +168,7 @@ module.exports = {
 
       ContentDetail: {
         type: 'object',
-        description: 'Yengil metadata payload — ijro uchun /contents/episodes ga alohida murojaat qiling',
+        description: 'Yengil metadata payload — TMDB spoken/original language fields are catalog hints, not verified playable audio tracks. Ijro uchun /contents/episodes ga alohida murojaat qiling.',
         properties: {
           provider:     { type: 'string', example: 'asilmedia' },
           contentId:    { type: 'string', nullable: true },
@@ -175,6 +181,19 @@ module.exports = {
           genres:       { type: 'array', items: { type: 'string' } },
           cast:         { type: 'array', items: { $ref: '#/components/schemas/CastMember' } },
           country:      { type: 'string', nullable: true },
+          originalLanguage: { type: 'string', nullable: true, example: 'en', description: 'TMDB original_language metadata; not a playable-track guarantee.' },
+          spokenLanguages: {
+            type: 'array',
+            description: 'TMDB spoken_languages metadata; may not represent all dubs or tracks available in a stream.',
+            items: {
+              type: 'object',
+              properties: {
+                code: { type: 'string', nullable: true, example: 'en' },
+                englishName: { type: 'string', nullable: true, example: 'English' },
+                name: { type: 'string', nullable: true, example: 'English' },
+              },
+            },
+          },
           director:     { type: 'string', nullable: true },
           duration:     { type: 'string', nullable: true },
           isSerial:     { type: 'boolean', description: 'true bo\'lsa /contents/episodes episodes qaytaradi, aks holda videoSources' },
@@ -299,6 +318,13 @@ module.exports = {
           videoSources: { type: 'array', items: { $ref: '#/components/schemas/VideoSource' }, description: 'Faqat isSerial=false bo\'lganda — video URL allaqachon hal qilingan' },
           playerSrc:    { type: 'string', nullable: true, description: 'Faqat isSerial=false bo\'lganda — default video URL' },
           headers:      { type: 'object', additionalProperties: { type: 'string' }, description: 'Faqat isSerial=false bo\'lganda — playerga uzatish kerak bo\'lgan HTTP headerlar (Referer, User-Agent...)' },
+          title:        { type: 'string', nullable: true },
+          host:         { type: 'string', nullable: true },
+          server:       { type: 'object', nullable: true },
+          languagesAvailable: { type: 'array', items: { type: 'string' }, description: 'Language labels explicitly found in stream metadata.' },
+          audioLanguages: { type: 'array', items: { type: 'string' } },
+          multiAudioAvailable: { type: 'boolean', description: 'Metadata label only; does not verify individual audio tracks.' },
+          languageSource: { type: 'string', nullable: true },
         },
       },
     },

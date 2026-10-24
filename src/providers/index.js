@@ -8,8 +8,8 @@ const vidapi     = require('./vidapi');
 const vidsrc     = require('./vidsrc');
 const pinoymoviepedia     = require('./pinoymoviepedia');
 const animeav1   = require('./animeav1');
-
-const _providers = { vidapi, vidsrc, asilmedia, anikai, idub, kinogo, mochitv, uzmovi, /*pinoymoviepedia,*/ animeav1 };
+const stremio    = require('./stremio');
+const _providers = { vidapi, vidsrc, asilmedia, anikai, idub, kinogo, mochitv, uzmovi, /*pinoymoviepedia,*/ animeav1, stremio };
 
 const _meta = {
     vidapi: {
@@ -76,6 +76,13 @@ const _meta = {
         url:         'https://uzmovi.tv',
         description: "O'zbek tilidagi onlayn kinoteatr — kinolar, seriallar, anime",
     },
+    stremio: {
+        id:          'stremio',
+        name:        'Worldwide',
+        image:       null,
+        url:         'https://www.stremio.com',
+        description: 'Global TMDB catalog and language metadata; playback requires configured community add-ons',
+    },
 
 };
 
@@ -103,7 +110,7 @@ function listProviders() {
     return Object.keys(_providers).map(id => {
         const m = _meta[id] ?? {};
         const img = m.image ?? null;
-        return {
+    return {
             id,
             name:        m.name        ?? id,
             image:       img,
@@ -111,6 +118,12 @@ function listProviders() {
             url:         m.url         ?? null,
             description: m.description ?? null,
             domains:     _providers[id].domains ?? [],
+            ...(id === 'stremio' && !_providers[id].isPlaybackConfigured?.()
+                ? {
+                    browseOnly: true,
+                    browseOnlyReason: 'Playback requires a valid server-configured community add-on manifest.',
+                  }
+                : {}),
         };
     });
 }
@@ -151,6 +164,8 @@ function normalizeDetail(raw, providerName) {
         year:        raw.year        ?? null,
         duration:    raw.duration    ?? null,
         country:     raw.country     ?? null,
+        originalLanguage: raw.originalLanguage ?? null,
+        spokenLanguages:  raw.spokenLanguages ?? [],
         director:    raw.director    ?? null,
         genres:      raw.genres      ?? [],
         cast:        normalizeCast(raw.cast),
@@ -205,9 +220,18 @@ function normalizeEpisodes(raw, providerName, opts = {}) {
         return {
             ...base,
             videoSources: raw.videoSources ?? [],
-            playerSrc:    raw.playerSrc    ?? null,
+            playerSrc:    raw.playerSrc    ?? raw.videoUrl ?? null,
             type:         raw.type         ?? null,
             headers:      raw.headers      ?? {},
+            ...(raw.title != null ? { title: raw.title } : {}),
+            ...(raw.host != null ? { host: raw.host } : {}),
+            ...(raw.server != null ? { server: raw.server } : {}),
+            ...(raw.mediaRef != null ? { mediaRef: raw.mediaRef } : {}),
+            ...(raw.subtitles != null ? { subtitles: raw.subtitles } : {}),
+            ...(raw.languagesAvailable != null ? { languagesAvailable: raw.languagesAvailable } : {}),
+            ...(raw.audioLanguages != null ? { audioLanguages: raw.audioLanguages } : {}),
+            ...(raw.multiAudioAvailable != null ? { multiAudioAvailable: raw.multiAudioAvailable } : {}),
+            ...(raw.languageSource != null ? { languageSource: raw.languageSource } : {}),
         };
     }
 
@@ -260,6 +284,10 @@ function normalizeMedia(raw, providerName) {
             ...(s.type ? { type: s.type } : {}),
             ...(s.headers ? { headers: s.headers } : {}),
             ...(s.embed ? { embed: s.embed } : {}),
+            ...(s.audioLanguage ? { audioLanguage: s.audioLanguage } : {}),
+            ...(s.audioLanguages ? { audioLanguages: s.audioLanguages } : {}),
+            ...(s.multiAudio != null ? { multiAudio: s.multiAudio } : {}),
+            ...(s.languageSource ? { languageSource: s.languageSource } : {}),
           }))
         : (videoUrl ? [{ quality: 'auto', videoUrl, isDefault: true }] : []);
 
@@ -271,7 +299,8 @@ function normalizeMedia(raw, providerName) {
         videoSources: sources,
     };
     for (const k of ['subtitles', 'poster', 'thumbnails', 'duration', 'host', 'embed',
-                     'title', 'backdrop', 'server', 'skip', 'alternates', 'languagesAvailable']) {
+                     'title', 'backdrop', 'server', 'skip', 'alternates', 'languagesAvailable',
+                     'audioLanguages', 'multiAudioAvailable', 'languageSource']) {
         if (raw[k] != null) out[k] = raw[k];
     }
     return out;

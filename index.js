@@ -41,12 +41,25 @@ const CACHE_RULES = [
   { test: /^\/api\/contents\/categories$/, maxAge: 3600, swr: 86400 },
   { test: /^\/api\/contents\/genres$/,     maxAge: 3600, swr: 86400 },
   { test: /^\/api\/contents\/providers$/,  maxAge: 3600, swr: 86400 },
+  { test: /^\/api\/contents\/languages$/,  maxAge: 86400, swr: 172800 },
+  { test: /^\/api\/contents\/watch-providers$/, maxAge: 3600, swr: 7200 },
   { test: /^\/api\/contents\/detail$/,     maxAge: 600, swr: 1800 },
-  { test: /^\/api\/contents\/episodes$/,   maxAge: 300, swr: 900 },
   { test: /^\/api\/contents\/search$/,     maxAge: 60, swr: 300 },
+];
+const NO_STORE_PATHS = [
+  /^\/api\/contents\/episodes$/,
+  /^\/api\/contents\/media$/,
 ];
 app.use((req, res, next) => {
   if (req.method !== 'GET') return next();
+  if (req.headers.authorization) {
+    res.setHeader('Cache-Control', 'private, no-store');
+    return next();
+  }
+  if (NO_STORE_PATHS.some((pattern) => pattern.test(req.path))) {
+    res.setHeader('Cache-Control', 'private, no-store');
+    return next();
+  }
   for (const rule of CACHE_RULES) {
     if (rule.test.test(req.path)) {
       res.setHeader('Cache-Control', `public, max-age=${rule.maxAge}, stale-while-revalidate=${rule.swr}`);

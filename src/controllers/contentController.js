@@ -1,5 +1,6 @@
 const { getProvider, detectProvider, listProviders, normalizeDetail, normalizeEpisodes, normalizeMedia, getEpisodes: providerGetEpisodes, resolveMedia } = require('../providers');
 const wyzieService = require('../services/wyzieService');
+const tmdb = require('../utils/tmdb');
 
 function normalizeFavoriteUrl(value) {
   return String(value || '').replace(/\/+$/, '');
@@ -68,6 +69,16 @@ async function getYear(req, res) {
   res.json(result);
 }
 
+async function discover(req, res) {
+  const { page = 1, provider = 'asilmedia', ...filters } = req.query;
+  const selected = getProvider(provider);
+  if (typeof selected.discover !== 'function') {
+    return res.status(501).json({ message: `${provider} discovery is not supported` });
+  }
+  const result = await selected.discover(filters, page);
+  res.json(result);
+}
+
 async function getCountry(req, res) {
   const { page = 1, provider = 'asilmedia' } = req.query;
   const result = await getProvider(provider).getCountry(req.params.country, page);
@@ -107,10 +118,10 @@ async function getDetail(req, res) {
 }
 
 async function getEpisodes(req, res) {
-  const { url, page, size, sort, provider } = req.query;
+  const { url, page, size, sort, provider, lang, server } = req.query;
   if (!url) return res.status(400).json({ message: 'url parametri majburiy' });
   const providerName = provider || detectProvider(url);
-  const opts = { page, size, sort };
+  const opts = { page, size, sort, lang, server };
   const raw = await providerGetEpisodes(providerName, url, opts);
   res.json(normalizeEpisodes(raw, providerName, opts));
 }
@@ -147,6 +158,51 @@ async function getProviders(req, res) {
   res.json({ items: listProviders() });
 }
 
+async function getLanguages(req, res) {
+  const items = await tmdb.getLanguages();
+  res.json({
+    items,
+    source: 'TMDB /configuration/languages',
+    note: 'This global language catalogue is for settings and metadata. It does not confirm that a title has a playable audio track in any listed language.',
+  });
+}
+
+async function getWatchProviders(req, res) {
+  const { url, region } = req.query;
+  if (!url || !region) return res.status(400).json({ message: 'url and region (ISO 3166-1 alpha-2) are required' });
+  const ref = tmdb.parseUrl(url);
+  if (!ref) return res.status(400).json({ message: 'A valid TMDB movie or TV URL is required' });
+  if (!/^[a-z]{2}$/i.test(region)) return res.status(400).json({ message: 'region must be a two-letter ISO country code' });
+
+  const regionCode = region.toUpperCase();
+  const byRegion = await tmdb.getWatchProviders(ref.type, ref.id);
+  const availability = byRegion[regionCode] || null;
+  const categories = ['flatrate', 'free', 'ads', 'rent', 'buy'];
+  const providers = new Map();
+  for (const category of categories) {
+    for (const item of availability?.[category] || []) {
+      if (!Number.isInteger(item.provider_id) || typeof item.provider_name !== 'string') continue;
+      const existing = providers.get(item.provider_id) || {
+        id: item.provider_id,
+        name: item.provider_name,
+        logoUrl: item.logo_path ? `https://image.tmdb.org/t/p/w92${item.logo_path}` : null,
+        availability: [],
+      };
+      existing.availability.push(category);
+      providers.set(item.provider_id, existing);
+    }
+  }
+
+  res.json({
+    region: regionCode,
+    providers: [...providers.values()],
+    tmdbLink: availability?.link || null,
+    source: 'JustWatch availability data via TMDB',
+    attribution: 'Streaming availability data provided by JustWatch via TMDB.',
+    note: 'Regional catalog availability only. TMDB returns no playable video URL or audio-track inventory.',
+  });
+}
+
 async function getSubtitles(req, res) {
   const { id, language = 'en', type, season, episode } = req.query;
   if (!id) return res.status(400).json({ message: 'id (TMDB yoki IMDB) majburiy' });
@@ -167,7 +223,7 @@ async function diagnose(req, res) {
 
 module.exports = {
   getLatest, getHome,
-  getCategory, getGenre, getYear, getCountry, getActor, getDirector,
+  getCategory, getGenre, getYear, discover, getCountry, getActor, getDirector,
   search, getDetail, getEpisodes, getMedia, checkVideo,
-  getCategories, getGenres, getProviders, diagnose, getSubtitles,
+  getCategories, getGenres, getProviders, getLanguages, getWatchProviders, diagnose, getSubtitles,
 };

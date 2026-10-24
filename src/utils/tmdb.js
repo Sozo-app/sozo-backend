@@ -2,7 +2,10 @@ const axios = require('axios');
 const https = require('https');
 const { SwrCache } = require('./swrCache');
 
-const TMDB_BASE = process.env.TMDB_PROXY_URL || 'https://jumpfreedom.com/3';
+const TMDB_API_KEY = String(process.env.TMDB_API_KEY || '').trim();
+const TMDB_BASE = process.env.TMDB_PROXY_URL
+    || (TMDB_API_KEY ? 'https://api.themoviedb.org/3' : 'https://jumpfreedom.com/3');
+const TMDB_USES_API_KEY = Boolean(TMDB_API_KEY && new URL(TMDB_BASE).hostname === 'api.themoviedb.org');
 const IMG_BASE  = 'https://image.tmdb.org/t/p';
 
 const httpsAgent = new https.Agent({ keepAlive: true, maxSockets: 16, maxFreeSockets: 8 });
@@ -25,7 +28,8 @@ async function api(path, params = {}) {
     const key = `tmdb:${path}:${JSON.stringify(params)}`;
     return swr.fetch(key, 10 * 60 * 1000, 60 * 60 * 1000, async () => {
         try {
-            const res = await http.get(path, { params });
+            const requestParams = TMDB_USES_API_KEY ? { ...params, api_key: TMDB_API_KEY } : params;
+            const res = await http.get(path, { params: requestParams });
             return res.data;
         } catch (err) {
             const status = err.response?.status;
@@ -76,10 +80,20 @@ function siteUrl(type, id)              { return `https://www.themoviedb.org/${t
 
 function parseUrl(url) {
     if (!url) return null;
-    const m = String(url).match(/themoviedb\.org\/(movie|tv)\/(\d+)(?:\/season\/(\d+)(?:\/episode\/(\d+))?)?/i);
+    let parsed;
+    try {
+        parsed = new URL(String(url));
+    } catch {
+        return null;
+    }
+    if (parsed.protocol !== 'https:'
+        || !['themoviedb.org', 'www.themoviedb.org'].includes(parsed.hostname.toLowerCase())
+        || parsed.username || parsed.password || (parsed.port && parsed.port !== '443')) return null;
+    const m = parsed.pathname.match(/^\/(movie|tv)\/(\d+)(?:-[^/]+)?(?:\/season\/(\d+)(?:-[^/]+)?(?:\/episode\/(\d+)(?:-[^/]+)?)?)?\/?$/i);
     if (!m) return null;
+    if (m[1].toLowerCase() === 'movie' && m[3]) return null;
     return {
-        type:    m[1],
+        type:    m[1].toLowerCase(),
         id:      Number(m[2]),
         season:  m[3] ? Number(m[3]) : null,
         episode: m[4] ? Number(m[4]) : null,
@@ -152,7 +166,56 @@ async function getYear(providerName, year, page = 1) {
     const data = await api('/discover/movie', { primary_release_year: y, page, sort_by: 'popularity.desc' });
     return buildListing(data, providerName, { type: 'movie', year: y, page: Number(page) });
 }
-
+function discoverParams(filters = {}, page = 1) {
+    const type = String(filters.type || 'movie').toLowerCase();
+    if (!['movie', 'tv'].includes(type)) {
+        throw Object.assign(new Error('type must be movie or tv'), { status: 400 });
+    }
+    const sort = String(filters.sort || 'popular').toLowerCase();
+    const dateField = type === 'movie' ? 'primary_release_date' : 'first_air_date';
+    const sortBy = {
+        popular: 'popularity.desc',
+        rating: 'vote_average.desc',
+        newest: `${dateField}.desc`,
+    }[sort];
+    if (!sortBy) {
+        throw Object.assign(new Error('sort must be popular, rating, or newest'), { status: 400 });
+    }
+    const params = {
+        page: Math.max(1, Number.parseInt(page, 10) || 1),
+        sort_by: sortBy,
+        include_adult: false,
+    };
+    const year = String(filters.year || '').trim();
+    if (year) {
+        if (!/^\d{4}$/.test(year) || Number(year) < 1870 || Number(year) > new Date().getFullYear() + 5) {
+            throw Object.assign(new Error('year must be a valid four-digit year'), { status: 400 });
+        }
+        params[type === 'movie' ? 'primary_release_year' : 'first_air_date_year'] = Number(year);
+    }
+    const rating = String(filters.rating || '').trim();
+    if (rating) {
+        const minimum = Number(rating);
+        if (!Number.isFinite(minimum) || minimum < 0 || minimum > 10) {
+            throw Object.assign(new Error('rating must be between 0 and 10'), { status: 400 });
+        }
+        if (minimum > 0) params['vote_average.gte'] = minimum;
+    }
+    const genre = String(filters.genre || '').trim().toLowerCase();
+    if (genre) {
+        const matched = genreBySlug(genre) || (Number(genre) && genreById(Number(genre)));
+        if (!matched) {
+            throw Object.assign(new Error(`Unknown genre "${genre}"`), { status: 400 });
+        }
+        params.with_genres = matched.id;
+    }
+    return { type, params };
+}
+async function discover(providerName, filters = {}, page = 1) {
+    const { type, params } = discoverParams(filters, page);
+    const data = await api(`/discover/${type}`, params);
+    return buildListing(data, providerName, { type, page: params.page });
+}
 async function getCountry(providerName, country, page = 1) {
     const data = await api('/discover/movie', { with_origin_country: country, page, sort_by: 'popularity.desc' });
     return buildListing(data, providerName, { type: 'movie', country, page: Number(page) });
@@ -269,6 +332,13 @@ async function getDetail(providerName, url) {
                  || null;
     const genres = (data.genres || []).map(g => g.name);
     const imdbId = data.external_ids?.imdb_id || data.imdb_id || null;
+    const spokenLanguages = (data.spoken_languages || [])
+        .filter(language => language && (language.iso_639_1 || language.english_name || language.name))
+        .map(language => ({
+            code:        language.iso_639_1 || null,
+            englishName: language.english_name || null,
+            name:        language.name || null,
+        }));
 
     return {
         provider:    providerName,
@@ -281,6 +351,8 @@ async function getDetail(providerName, url) {
         year:        year ? Number(year) : null,
         duration,
         country,
+        originalLanguage: data.original_language || null,
+        spokenLanguages,
         director,
         genres,
         cast,
@@ -317,6 +389,24 @@ async function getExternalIds(type, tmdbId) {
     return api(`/${type}/${tmdbId}/external_ids`);
 }
 
+async function getLanguages() {
+    const data = await api('/configuration/languages');
+    return (Array.isArray(data) ? data : [])
+        .filter(language => language && typeof language.iso_639_1 === 'string' && language.iso_639_1)
+        .map(language => ({
+            code:        language.iso_639_1,
+            englishName: language.english_name || language.name || language.iso_639_1,
+            label:       language.english_name || language.name || language.iso_639_1,
+            name:        language.name || '',
+        }))
+        .sort((left, right) => left.englishName.localeCompare(right.englishName));
+}
+
+async function getWatchProviders(type, tmdbId) {
+    const data = await api(`/${type}/${tmdbId}/watch/providers`);
+    return data?.results && typeof data.results === 'object' ? data.results : {};
+}
+
 function categoryList(providerName) {
     return Object.keys(CATEGORIES).map(slug => ({
         provider: providerName,
@@ -349,6 +439,8 @@ module.exports = {
     getCategory,
     getGenre,
     getYear,
+    discover,
+    discoverParams,
     getCountry,
     getActor,
     getDirector,
@@ -357,6 +449,8 @@ module.exports = {
     getDetail,
     getSeasonEpisodes,
     getExternalIds,
+    getLanguages,
+    getWatchProviders,
     categoryList,
     genreList,
     CATEGORIES,

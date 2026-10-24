@@ -14,7 +14,7 @@ const providerParam = {
   schema: {
     type: 'string',
     default: 'asilmedia',
-    enum: ['asilmedia', 'anikai', 'idub', 'mochitv', 'uzmovi', 'vidapi', 'vidsrc', 'animeav1'],
+    enum: ['asilmedia', 'anikai', 'idub', 'mochitv', 'uzmovi', 'vidapi', 'vidsrc', 'animeav1', 'stremio'],
     example: 'asilmedia',
   },
   description: 'Kontent manbai (default: asilmedia)',
@@ -35,12 +35,103 @@ module.exports = {
                 schema: {
                   type: 'object',
                   properties: {
-                    items: { type: 'array', items: { type: 'string' }, example: ['asilmedia'] },
+                    items: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        properties: {
+                          id: { type: 'string', example: 'stremio' },
+                          name: { type: 'string', example: 'Worldwide' },
+                          image: { type: 'string', nullable: true },
+                          logo: { type: 'string', nullable: true },
+                          url: { type: 'string' },
+                          description: { type: 'string' },
+                          domains: { type: 'array', items: { type: 'string' } },
+                        },
+                      },
+                    },
                   },
                 },
               },
             },
           },
+        },
+      },
+    },
+
+    '/contents/languages': {
+      get: {
+        tags: ['Contents'],
+        summary: 'Global language choices for Settings',
+        description: 'Returns TMDB\'s ISO 639-1 language catalogue for Settings. It is not a list of playable audio tracks and does not guarantee dubbing or a stream in those languages.',
+        responses: {
+          200: {
+            description: 'TMDB language catalogue',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    items: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        properties: {
+                          code: { type: 'string', example: 'hi' },
+                          englishName: { type: 'string', example: 'Hindi' },
+                          label: { type: 'string', example: 'Hindi' },
+                          name: { type: 'string', example: 'हिन्दी' },
+                        },
+                      },
+                    },
+                    source: { type: 'string' },
+                    note: { type: 'string' },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+
+    '/contents/watch-providers': {
+      get: {
+        tags: ['Contents'],
+        summary: 'Regional legal streaming availability hints',
+        description: 'Reads TMDB/JustWatch availability for a TMDB movie or TV URL and an explicit region. It returns service names and a TMDB watch page, not a direct video URL or audio-track inventory. Attribute availability data to JustWatch.',
+        parameters: [
+          {
+            in: 'query', name: 'url', required: true,
+            schema: { type: 'string' },
+            description: 'TMDB movie or TV URL',
+          },
+          {
+            in: 'query', name: 'region', required: true,
+            schema: { type: 'string', pattern: '^[A-Za-z]{2}$', example: 'IN' },
+            description: 'Two-letter ISO 3166-1 country code; region is explicit, not inferred from location.',
+          },
+        ],
+        responses: {
+          200: {
+            description: 'Regional provider availability metadata',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    region: { type: 'string', example: 'IN' },
+                    providers: { type: 'array', items: { type: 'object' } },
+                    tmdbLink: { type: 'string', nullable: true },
+                    source: { type: 'string', example: 'JustWatch availability data via TMDB' },
+                    attribution: { type: 'string' },
+                    note: { type: 'string' },
+                  },
+                },
+              },
+            },
+          },
+          400: { $ref: '#/components/responses/BadRequest' },
         },
       },
     },
@@ -187,7 +278,7 @@ module.exports = {
       get: {
         tags: ['Contents'],
         summary: 'Kontent metadatasi — yengil va tez',
-        description: 'Faqat metadata: title, description, cast, screenshots, related va isSerial flag. Epizodlar yoki video manbalari uchun /contents/episodes ga murojaat qiling. Provider `url` dan avtomatik aniqlanadi. Authorization header berilsa `isFavorited` ham qaytadi.',
+        description: 'Faqat metadata: title, description, cast, screenshots, related va isSerial flag. Epizodlar yoki video manbalari uchun /contents/episodes ga murojaat qiling. Stremio/TMDB URL larida `provider=stremio` ni yuboring, chunki TMDB URL bir nechta providerda ishlatiladi. Authorization header berilsa `isFavorited` ham qaytadi.',
         security: [{}, { BearerAuth: [] }],
         parameters: [
           {
@@ -195,6 +286,11 @@ module.exports = {
             schema: { type: 'string' },
             description: 'Kontent URL (istalgan provider)',
             example: 'https://asilmedia.org/17987-arosat-oramizda.html',
+          },
+          {
+            in: 'query', name: 'provider',
+            schema: { type: 'string', example: 'stremio' },
+            description: 'Optional explicit provider. Required for TMDB URLs used by the Worldwide profile.',
           },
         ],
         responses: {
@@ -212,7 +308,7 @@ module.exports = {
       get: {
         tags: ['Contents'],
         summary: 'Ijro payloadi — epizodlar (serial) yoki video manbalari (kino)',
-        description: "Detail dan alohida endpoint, chunki ayrim providerlar epizodlarni alohida so'rovda olib keladi. Serial bo'lsa `episodes` (lazy `mediaRef` bilan, paginated), kino bo'lsa `videoSources` + `playerSrc` qaytaradi.\n\n**Pagination & sort** (faqat serial uchun):\n- `page` (default 1) va `size` (default 100, max 500) — One Piece kabi 1000+ epizodli serial uchun.\n- `sort=asc` (1 → N, default) yoki `sort=desc` (N → 1) — masalan, oxirgi epizoddan boshlab ko'rish uchun.\n\nProvider `url` dan avtomatik aniqlanadi.",
+        description: "Detail dan alohida endpoint, chunki ayrim providerlar epizodlarni alohida so'rovda olib keladi. Serial bo'lsa `episodes` (lazy `mediaRef` bilan, paginated), kino bo'lsa `videoSources` + `playerSrc` qaytaradi. Worldwide/TMDB kontentida `provider=stremio` ni aniq yuboring.\n\n**Pagination & sort** (faqat serial uchun):\n- `page` (default 1) va `size` (default 100, max 500) — One Piece kabi 1000+ epizodli serial uchun.\n- `sort=asc` (1 → N, default) yoki `sort=desc` (N → 1) — masalan, oxirgi epizoddan boshlab ko'rish uchun.",
         parameters: [
           {
             in: 'query', name: 'url', required: true,
@@ -234,6 +330,21 @@ module.exports = {
             in: 'query', name: 'sort',
             schema: { type: 'string', enum: ['asc', 'desc'], default: 'asc' },
             description: "asc = 1→N (default), desc = N→1",
+          },
+          {
+            in: 'query', name: 'provider',
+            schema: { type: 'string', example: 'stremio' },
+            description: 'Provider name from the content detail response; required when the content URL is shared by multiple providers.',
+          },
+          {
+            in: 'query', name: 'lang',
+            schema: { type: 'string', example: 'hi' },
+            description: 'Optional language preference. Stremio matches only explicit add-on stream labels; AnimeKAI uses sub/softsub/dub.',
+          },
+          {
+            in: 'query', name: 'server',
+            schema: { type: 'integer', default: 1, minimum: 1 },
+            description: 'Optional source index (1-based) after language filtering.',
           },
         ],
         responses: {
@@ -266,8 +377,8 @@ module.exports = {
           },
           {
             in: 'query', name: 'lang', required: false,
-            schema: { type: 'string', enum: ['sub', 'softsub', 'dub'], default: 'sub' },
-            description: 'Provider qo\'llasa: ovoz/subtitr varianti. Episodes responsedagi `availableLangs` ichidan tanlang.',
+            schema: { type: 'string', example: 'hi' },
+            description: 'Provider qo\'llasa: AnimeKAI `sub|softsub|dub` rejimini, Stremio esa ISO 639-1 audio-language kodini (masalan `hi`, `en`) qabul qiladi. Stremio faqat add-on matnida aniq ko\'rsatilgan tilga moslaydi.',
           },
           {
             in: 'query', name: 'server', required: false,
@@ -323,8 +434,21 @@ module.exports = {
                     },
                     languagesAvailable: {
                       type: 'array', nullable: true,
-                      description: 'Provider qo\'llasa: epizod uchun mavjud til variantlari',
-                      items: { type: 'string', enum: ['sub', 'softsub', 'dub'] },
+                      description: 'Provider metadata-sida shu ijro javobi uchun tanilgan audio til kodlari; to\'liq audio-trek tekshiruvi emas.',
+                      items: { type: 'string', example: 'hi' },
+                    },
+                    audioLanguages: {
+                      type: 'array', nullable: true,
+                      description: 'Tanlangan oqimning add-on metadata-sidan aniqlangan til kodlari.',
+                      items: { type: 'string', example: 'hi' },
+                    },
+                    multiAudioAvailable: {
+                      type: 'boolean', nullable: true,
+                      description: 'At least one add-on stream is labeled Multi/Dual Audio; this does not identify or verify individual tracks.',
+                    },
+                    languageSource: {
+                      type: 'string', nullable: true,
+                      description: 'Til yorlig\'ining kelib chiqishi; Stremio uchun add-on stream nomi/title/description/filename.',
                     },
                   },
                 },
